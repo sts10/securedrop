@@ -254,8 +254,6 @@
   /var/www/securedrop/static/fonts/fa-solid-900.ttf r,
   /var/www/securedrop/static/fonts/fa-solid-900.woff r,
   /var/www/securedrop/static/fonts/fa-solid-900.woff2 r,
-  /var/www/securedrop/static/gen/journalist.js rw,
-  /var/www/securedrop/static/gen/source.js rw,
   /var/www/securedrop/static/i/check.png r,
   /var/www/securedrop/static/i/checkbox.png r,
   /var/www/securedrop/static/i/close.png r,
