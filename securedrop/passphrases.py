@@ -95,6 +95,18 @@ class PassphraseGenerator:
                     )
                 )
 
+            # Ensure that there are no duplicate words on the list
+            duplicate_words = [item for item in set(word_list) if word_list.count(item) > 1]
+            if len(duplicate_words) > 0:
+                raise InvalidWordListError(
+                    "Passphrase word lists must not contain duplicate words."
+                    " duplicate words in word list for language '{}' are '{}'".format(
+                        language,
+                        duplicate_words,
+                    )
+                )
+
+
     @classmethod
     def get_default(cls) -> "PassphraseGenerator":
         global _default_generator
