@@ -221,7 +221,7 @@ def add_reply(
     record_source_interaction(source)
     fname = f"{source.interaction_count}-{source.journalist_filename}-reply.gpg"
     EncryptionManager.get_default().encrypt_journalist_reply(
-        for_source_with_filesystem_id=source.filesystem_id,
+        for_source=source,
         reply_in=next(replies),
         encrypted_reply_path_out=Path(Storage.get_default().path(source.filesystem_id, fname)),
     )
@@ -239,7 +239,7 @@ def add_reply(
     db.session.commit()
 
 
-def add_source() -> Tuple[Source, str]:
+def add_source(use_gpg: bool = False) -> Tuple[Source, str]:
     """
     Adds a single source.
     """
@@ -250,10 +250,27 @@ def add_source() -> Tuple[Source, str]:
         source_app_storage=Storage.get_default(),
     )
     source = source_user.get_db_record()
-    db.session.commit()
+    if use_gpg:
+        manager = EncryptionManager.get_default()
+        gen_key_input = manager.gpg().gen_key_input(
+            passphrase=source_user.gpg_secret,
+            name_email=source_user.filesystem_id,
+            key_type="RSA",
+            key_length=4096,
+            name_real="Source Key",
+            creation_date="2013-05-14",
+            # '0' is the magic value that tells GPG's batch key generation not
+            # to set an expiration date.
+            expire_date="0",
+        )
+        manager.gpg().gen_key(gen_key_input)
 
-    # Generate source key
-    EncryptionManager.get_default().generate_source_key_pair(source_user)
+        # Delete the Sequoia-generated keys
+        source.pgp_public_key = None
+        source.pgp_fingerprint = None
+        source.pgp_secret_key = None
+        db.session.add(source)
+    db.session.commit()
 
     return source, codename
 
@@ -326,7 +343,7 @@ def add_sources(args: argparse.Namespace, journalists: Tuple[Journalist, ...]) -
     )
 
     for i in range(1, args.source_count + 1):
-        source, codename = add_source()
+        source, codename = add_source(use_gpg=args.gpg)
 
         for _ in range(args.messages_per_source):
             submit_message(source, secrets.choice(journalists) if seen_message_count > 0 else None)
@@ -452,6 +469,12 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--seed",
         help=("Random number seed (for reproducible datasets)"),
+    )
+    parser.add_argument(
+        "--gpg",
+        help="Create sources with a key pair stored in GPG",
+        action="store_true",
+        default=False,
     )
     return parser.parse_args()
 

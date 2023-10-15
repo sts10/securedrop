@@ -2,13 +2,11 @@ from pathlib import Path
 
 import werkzeug
 from db import db
-from encryption import EncryptionManager, GpgKeyNotFoundError
+from encryption import GpgKeyNotFoundError
 from flask import (
     Blueprint,
-    Markup,
     abort,
     current_app,
-    escape,
     flash,
     redirect,
     render_template,
@@ -32,6 +30,7 @@ from journalist_app.utils import (
     make_star_true,
     mark_seen,
 )
+from markupsafe import Markup, escape
 from models import Reply, Submission
 from sqlalchemy.orm.exc import NoResultFound
 from store import Storage
@@ -56,13 +55,11 @@ def make_blueprint() -> Blueprint:
     def col(filesystem_id: str) -> str:
         form = ReplyForm()
         source = get_source(filesystem_id)
-        try:
-            EncryptionManager.get_default().get_source_public_key(filesystem_id)
-            source.has_key = True
-        except GpgKeyNotFoundError:
-            source.has_key = False
+        has_key = source.public_key is not None
 
-        return render_template("col.html", filesystem_id=filesystem_id, source=source, form=form)
+        return render_template(
+            "col.html", filesystem_id=filesystem_id, source=source, has_key=has_key, form=form
+        )
 
     @view.route("/delete/<filesystem_id>", methods=("POST",))
     def delete_single(filesystem_id: str) -> werkzeug.Response:

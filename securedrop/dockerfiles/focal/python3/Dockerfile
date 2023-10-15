@@ -6,6 +6,8 @@ RUN apt-get update  && apt-get install -y \
     # with its being installed along with everything else since it will be
     # cached along with everything else too.
     default-jdk \
+    # For diffoscope:
+    libarchive13 libmagic1 \
     libasound2 libdbus-glib-1-2 libgtk2.0-0 libfontconfig1 libxrender1 \
     libcairo-gobject2 libgtk-3-0 libstartup-notification0 npm && \
     npm install --global html_codesniffer@2.5.1
@@ -13,8 +15,8 @@ RUN apt-get update  && apt-get install -y \
 # Current versions of the test browser software. Tor Browser is based
 # on a specific version of Firefox, noted in Help > About Tor Browser.
 # Ideally we'll keep those in sync.
-ENV FF_VERSION 91.12.0esr
-ENV GECKODRIVER_VERSION v0.29.1
+ENV FF_VERSION 115.3.1esr
+ENV GECKODRIVER_VERSION v0.33.0
 
 # Import Tor release signing key
 ENV TOR_RELEASE_KEY_FINGERPRINT "EF6E286DDA85EA2A4BA7DE684E2C6E8793298290"
@@ -22,13 +24,13 @@ RUN curl -s https://openpgpkey.torproject.org/.well-known/openpgpkey/torproject.
 
 # Fetch latest TBB version (obtained from https://github.com/micahflee/torbrowser-launcher/blob/develop/torbrowser_launcher/common.py#L198) and install Tor Browser
 RUN TBB_VERSION=$(curl -s https://aus1.torproject.org/torbrowser/update_3/release/Linux_x86_64-gcc3/x/ALL | grep -oP '(?<=appVersion=")[^"]*' | head -1) && \
-    wget https://www.torproject.org/dist/torbrowser/${TBB_VERSION}/tor-browser-linux64-${TBB_VERSION}_ALL.tar.xz && \
-    wget https://www.torproject.org/dist/torbrowser/${TBB_VERSION}/tor-browser-linux64-${TBB_VERSION}_ALL.tar.xz.asc && \
+    wget https://www.torproject.org/dist/torbrowser/${TBB_VERSION}/tor-browser-linux-x86_64-${TBB_VERSION}.tar.xz && \
+    wget https://www.torproject.org/dist/torbrowser/${TBB_VERSION}/tor-browser-linux-x86_64-${TBB_VERSION}.tar.xz.asc && \
     gpg2 --output ./tor.keyring --export ${TOR_RELEASE_KEY_FINGERPRINT} && \
-    gpgv --keyring ./tor.keyring tor-browser-linux64-${TBB_VERSION}_ALL.tar.xz.asc tor-browser-linux64-${TBB_VERSION}_ALL.tar.xz && \
-    tar -xvJf tor-browser-linux64-${TBB_VERSION}_ALL.tar.xz && \
+    gpgv --keyring ./tor.keyring tor-browser-linux-x86_64-${TBB_VERSION}.tar.xz.asc tor-browser-linux-x86_64-${TBB_VERSION}.tar.xz && \
+    tar -xvJf tor-browser-linux-x86_64-${TBB_VERSION}.tar.xz && \
     mkdir -p /root/.local/tbb && mv tor-browser /root/.local/tbb && \
-    rm -f tor.keyring tor-browser-linux64-${TBB_VERSION}_ALL.tar.xz.asc tor-browser-linux64-${TBB_VERSION}_ALL.tar.xz
+    rm -f tor.keyring tor-browser-linux-x86_64-${TBB_VERSION}.tar.xz.asc tor-browser-linux-x86_64-${TBB_VERSION}.tar.xz
 
 # Import Mozilla release signing key
 ENV MOZILLA_RELEASE_KEY_FINGERPRINT "14F26682D0916CDD81E37B6D61B7B526D98F0353"

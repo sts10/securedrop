@@ -22,7 +22,7 @@ def test_gpg_export_keys(tmp_path):
     fingerprint = gpg.gen_key(gen_key_input)
     print(fingerprint)
     public_key = gpg.export_keys(fingerprint)
-    assert public_key.startswith("-----BEGIN PGP PUBLIC KEY BLOCK-----")
+    assert redwood.is_valid_public_key(public_key)
     secret_key = gpg.export_keys(fingerprint, secret=True, passphrase=passphrase)
     assert secret_key.startswith("-----BEGIN PGP PRIVATE KEY BLOCK-----")
 
@@ -30,7 +30,7 @@ def test_gpg_export_keys(tmp_path):
     message = "GPG to Sequoia-PGP, yippe!"
     ciphertext = tmp_path / "encrypted.asc"
     redwood.encrypt_message([public_key], message, ciphertext)
-    decrypted = redwood.decrypt(ciphertext.read_bytes(), secret_key, passphrase)
+    decrypted = redwood.decrypt(ciphertext.read_bytes(), secret_key, passphrase).decode()
     assert decrypted == message
 
     # Test some failure cases for exporting the secret key:

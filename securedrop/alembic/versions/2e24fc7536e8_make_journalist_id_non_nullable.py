@@ -5,24 +5,15 @@ Revises: de00920916bf
 Create Date: 2022-01-12 19:31:06.186285
 
 """
-import os
 import uuid
 
 import argon2
 import sqlalchemy as sa
 import two_factor
 from alembic import op
-
-# raise the errors if we're not in production
-raise_errors = os.environ.get("SECUREDROP_ENV", "prod") != "prod"
-
-try:
-    from models import ARGON2_PARAMS
-    from passphrases import PassphraseGenerator
-except:  # noqa
-    if raise_errors:
-        raise
-
+from models import ARGON2_PARAMS
+from passphrases import PassphraseGenerator
+from sdconfig import SecureDropConfig
 
 # revision identifiers, used by Alembic.
 revision = "2e24fc7536e8"
@@ -72,7 +63,7 @@ def migrate_nulls() -> None:
     conn = op.get_bind()
     for table in tables:
         result = conn.execute(
-            f"SELECT 1 FROM {table} WHERE journalist_id IS NULL;"  # nosec
+            f"SELECT 1 FROM {table} WHERE journalist_id IS NULL;"  # noqa: S608
         ).first()
         if result is not None:
             needs_migration.append(table)
@@ -89,15 +80,23 @@ def migrate_nulls() -> None:
         # unique key violations.
         op.execute(
             sa.text(
-                f"UPDATE OR IGNORE {table} SET journalist_id=:journalist_id "  # nosec
+                f"UPDATE OR IGNORE {table} SET journalist_id=:journalist_id "  # noqa: S608
                 "WHERE journalist_id IS NULL;"
             ).bindparams(journalist_id=deleted_id)
         )
         # Then we delete any leftovers which had been ignored earlier.
-        op.execute(f"DELETE FROM {table} WHERE journalist_id IS NULL")  # nosec
+        op.execute(f"DELETE FROM {table} WHERE journalist_id IS NULL")  # noqa: S608
 
 
 def upgrade() -> None:
+    try:
+        # While this migration doesn't use SecureDrop config directly,
+        # it's transitively used via PassphraseGenerator
+        SecureDropConfig.get_current()
+    except ModuleNotFoundError:
+        # Fresh install, nothing to migrate
+        return
+
     migrate_nulls()
 
     with op.batch_alter_table("journalist_login_attempt", schema=None) as batch_op:

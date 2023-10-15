@@ -4,6 +4,7 @@ GCLOUD_VERSION := 222.0.0-1
 SDROOT := $(shell git rev-parse --show-toplevel)
 TAG ?= $(shell git rev-parse HEAD)
 STABLE_VER := $(shell cat molecule/shared/stable.ver)
+VERSION=$(shell python -c "import securedrop.version; print(securedrop.version.__version__)")
 
 SDBIN := $(SDROOT)/securedrop/bin
 DEVSHELL := $(SDBIN)/dev-shell
@@ -34,6 +35,7 @@ update-python3-requirements:  ## Update Python 3 requirements with pip-compile.
 		--output-file requirements/python3/develop-requirements.txt \
 		../admin/requirements-ansible.in \
 		../admin/requirements.in \
+		requirements/python3/translation-requirements.in \
 		requirements/python3/develop-requirements.in
 	@SLIM_BUILD=1 $(DEVSHELL) pip-compile --generate-hashes \
 		--allow-unsafe \
@@ -137,8 +139,10 @@ yamllint:  ## Lint YAML files (does not validate syntax!).
 	@yamllint --strict .
 	@echo
 
+# While the order mostly doesn't matter here, keep "check-ruff" first, since it
+# gives the broadest coverage and runs (and therefore fails) fastest.
 .PHONY: lint
-lint: ansible-config-lint check-ruff app-lint check-black html-lint shellcheck typelint yamllint ## Runs all lint checks
+lint: check-ruff ansible-config-lint app-lint check-black check-desktop-files check-strings check-supported-locales html-lint shellcheck typelint yamllint ## Runs all lint checks
 
 .PHONY: safety
 safety:  ## Run `safety check` to check python dependencies for vulnerabilities.
@@ -166,24 +170,14 @@ safety:  ## Run `safety check` to check python dependencies for vulnerabilities.
                 --ignore 55261 \
                 --ignore 58912 \
                 --ignore 59473 \
+                --ignore 60350 \
+		--ignore 60789 \
+		--ignore 60841 \
 		--full-report -r $$req_file \
 		&& echo -e '\n' \
 		|| exit 1; \
 	done
 	@echo
-
-# Bandit is a static code analysis tool to detect security vulnerabilities in Python applications
-# https://wiki.openstack.org/wiki/Security/Projects/Bandit
-.PHONY: bandit
-
-bandit: test-config ## Run bandit with medium level excluding test-related folders.
-	@command -v bandit || (echo "Please run 'pip install -U bandit'."; exit 1)
-	@echo "███ Running bandit..."
-	@bandit -ll --exclude ./admin/.tox,./admin/.venv,./admin/.eggs,./molecule,./testinfra,./securedrop/tests,./.tox,./.venv*,securedrop/config.py,./target --recursive .
-	@echo "███ Running bandit on securedrop/config.py..."
-	@bandit -ll --skip B108 securedrop/config.py
-	@echo
-
 
 # Semgrep is a static code analysis tool to detect security vulnerabilities in Python applications
 # This configuration uses the public "p/r2c-security-audit" ruleset
@@ -193,6 +187,16 @@ semgrep:
 	@echo "███ Running semgrep on securedrop/..."
 	@semgrep --exclude "securedrop/tests/" --error --strict --metrics off --max-chars-per-line 200 --verbose --config "p/r2c-security-audit" securedrop
 	@echo
+
+
+# check dependencies in Cargo.lock
+.PHONY: rust-audit
+rust-audit:
+	@echo "███ Running Rust dependency checks..."
+	@cargo install cargo-audit
+	@cargo audit
+	@echo
+
 
 #############
 #
@@ -212,7 +216,8 @@ securedrop/config.py: ## Generate the test SecureDrop application config.
 		 ctx.update(dict((k, {"stdout":v}) for k,v in os.environ.items())); \
 		 ctx = open("config.py", "w").write(env.get_template("config.py.example").render(ctx))'
 	@echo >> securedrop/config.py
-	@echo "SUPPORTED_LOCALES = $$(if test -f /opt/venvs/securedrop-app-code/bin/python3; then ./securedrop/i18n_tool.py list-locales --python; else DOCKER_BUILD_VERBOSE=false $(DEVSHELL) ./i18n_tool.py list-locales --python; fi)" | sed 's/\r//' >> securedrop/config.py
+	@echo "SUPPORTED_LOCALES = $$(make --quiet supported-locales)" >> securedrop/config.py
+	@echo "SUPPORTED_LOCALES.append('en_US')" >> securedrop/config.py
 	@echo
 
 HOOKS_DIR=.githooks
@@ -326,29 +331,132 @@ upgrade-destroy:  ## Destroy an upgrade test environment.
 #
 ##############
 
-.PHONY: translate
-translate:  ## Update POT files from translated strings in source code.
-	@echo "Updating translations..."
-	@$(DEVSHELL) $(SDROOT)/securedrop/i18n_tool.py translate-messages --extract-update
-	@$(DEVSHELL) $(SDROOT)/securedrop/i18n_tool.py translate-desktop --extract-update
-	@echo
+# Global configuration:
+I18N_CONF=securedrop/i18n.json
+I18N_LIST=securedrop/i18n.rst
+
+# securedrop/securedrop configuration:
+LOCALE_DIR=securedrop/translations
+POT=$(LOCALE_DIR)/messages.pot
+
+# securedrop/desktop configuration:
+DESKTOP_BASE=install_files/ansible-base/roles/tails-config/templates
+DESKTOP_LOCALE_DIR=$(DESKTOP_BASE)/locale
+DESKTOP_I18N_CONF=$(DESKTOP_LOCALE_DIR)/LINGUAS
+DESKTOP_POT=$(DESKTOP_LOCALE_DIR)/messages.pot
+
+## Global
+
+.PHONY: check-strings
+check-strings: $(POT) $(DESKTOP_POT) ## Check that the translation catalogs are up to date with source code.
+	@$(MAKE) --no-print-directory extract-strings
+	@git diff --quiet $^ || { echo "Translation catalogs are out of date. Please run \"make extract-strings\" and commit the changes."; exit 1; }
+
+.PHONY: extract-strings
+extract-strings: $(POT) $(DESKTOP_POT) ## Extract translatable strings from source code.
+	@$(MAKE) --always-make --no-print-directory $^
+
+## securedrop/securedrop
+
+# Derive POT from sources.
+$(POT): securedrop
+	@echo "updating catalog template: $@"
+	@mkdir -p ${LOCALE_DIR}
+	@pybabel extract \
+		-F securedrop/babel.cfg \
+		--charset=utf-8 \
+		--output=${POT} \
+		--project="SecureDrop" \
+		--version=${VERSION} \
+		--msgid-bugs-address=securedrop@freedom.press \
+		--copyright-holder="Freedom of the Press Foundation" \
+		--add-comments="Translators:" \
+		--strip-comments \
+		--add-location=never \
+		--no-wrap \
+		--ignore-dirs tests \
+		$^
+	@sed -i -e '/^"POT-Creation-Date/d' $@
+
+## securedrop/desktop
+
+.PHONY: check-desktop-files
+check-desktop-files: ${DESKTOP_BASE}/*.j2
+	@$(MAKE) --always-make --no-print-directory update-desktop-files
+	@git diff --quiet $^ || [[ "$$CIRCLE_PR_USERNAME" == "weblate-fpf" ]] || { echo "Desktop files are out of date. Please run \"make update-desktop-files\" and commit the changes."; exit 1; }
+
+.PHONY: update-desktop-files
+update-desktop-files: ${DESKTOP_BASE}/*.j2
+	@$(MAKE) --always-make --no-print-directory $^
+
+# Derive POT from templates.
+$(DESKTOP_POT): ${DESKTOP_BASE}/*.in
+	pybabel extract \
+		-F securedrop/babel.cfg \
+		--output=${DESKTOP_POT} \
+		--project=SecureDrop \
+		--version=${VERSION} \
+		--msgid-bugs-address=securedrop@freedom.press \
+		--copyright-holder="Freedom of the Press Foundation" \
+		--add-location=never \
+		--sort-output \
+		$^
+	@sed -i -e '/^"POT-Creation-Date/d' $@
+
+# Render desktop files from templates.  msgfmt needs each
+# "$LANG/LC_MESSAGES/messages.po" file in "$LANG.po".
+%.j2: %.j2.in
+	@find ${DESKTOP_LOCALE_DIR}/* \
+		-maxdepth 0 \
+		-type d \
+		-exec bash -c 'locale="$$(basename {})"; cp ${DESKTOP_LOCALE_DIR}/$${locale}/LC_MESSAGES/messages.po $(DESKTOP_LOCALE_DIR)/$${locale}.po' \;
+	@msgfmt \
+		-d ${DESKTOP_LOCALE_DIR} \
+		--desktop \
+		--template $< \
+		--output-file $@
+	@rm ${DESKTOP_LOCALE_DIR}/*.po
+
+# Render desktop list from "i18n.json".
+$(DESKTOP_I18N_CONF):
+	@jq --raw-output '.supported_locales[].desktop' ${I18N_CONF} > $@
+
+## Supported locales
+
+.PHONY: check-supported-locales
+check-supported-locales: $(I18N_LIST) $(DESKTOP_I18N_CONF) ## Check that the desktop and documentation lists of supported locales are up to date.
+	@$(MAKE) --no-print-directory update-supported-locales
+	@git diff --quiet $^ || { echo "Desktop and/or documentation lists of supported locales are out of date. Please run \"make update-supported-locales\" and commit the changes."; exit 1; }
+
+.PHONY: count-supported-locales
+count-supported-locales: ## Return the number of supported locales.
+	@jq --raw-output '.supported_locales | length' ${I18N_CONF}
+
+.PHONY: update-supported-locales
+update-supported-locales: $(I18N_LIST) $(DESKTOP_I18N_CONF) ## Render the desktop and documentation list of supported locales.
+	@$(MAKE) --always-make --no-print-directory $^
+
+# Render documentation list from "i18n.json".
+${I18N_LIST}: ${I18N_CONF}
+	@echo '.. GENERATED BY "make update-supported-locales":' > $@
+	@jq --raw-output \
+		'.supported_locales | to_entries | map("* \(.value.name) (``\(.key)``)") | join("\n")' \
+		$< >> $@
+
+.PHONY: supported-locales
+supported-locales: ## List supported locales (languages).
+	@jq --compact-output '.supported_locales | keys' ${I18N_CONF}
+
+## Utilities
 
 .PHONY: translation-test
-translation-test:  ## Run page layout tests in all supported languages.
+translation-test: ## Run page layout tests in all supported languages.
 	@echo "Running translation tests..."
 	@$(DEVSHELL) $(SDBIN)/translation-test $${LOCALES}
 	@echo
 
-.PHONY: list-translators
-list-translators:  ## Collect the names of translators since the last merge from Weblate.
-	@$(DEVSHELL) $(SDROOT)/securedrop/i18n_tool.py list-translators
-
-.PHONY: list-all-translators
-list-all-translators:  ## Collect the names of all translators in the project's history.
-	@$(DEVSHELL) $(SDROOT)/securedrop/i18n_tool.py list-translators --all
-
 .PHONY: update-user-guides
-update-user-guides:  ## Regenerate docs screenshots. Set DOCS_REPO_DIR to repo checkout root.
+update-user-guides: ## Regenerate docs screenshots. Set DOCS_REPO_DIR to repo checkout root.
 ifndef DOCS_REPO_DIR
 	$(error DOCS_REPO_DIR must be set to the documentation repo checkout root.)
 endif
@@ -357,6 +465,12 @@ endif
 	@echo "Copying screenshots..."
 	cp securedrop/tests/functional/pageslayout/screenshots/en_US/*.png $${DOCS_REPO_DIR}/docs/images/manual/screenshots
 	@echo
+
+.PHONY: verify-mo
+verify-mo: ## Verify that all gettext machine objects (.mo) are reproducible from their catalogs (.po).
+	@TERM=dumb devops/scripts/verify-mo.py ${DESKTOP_LOCALE_DIR}/*
+	@# All good; now clean up.
+	@git restore "${LOCALE_DIR}/**/*.po"
 
 
 ###########

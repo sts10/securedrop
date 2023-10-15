@@ -8,10 +8,8 @@ from db import db
 from encryption import EncryptionManager
 from flask import (
     Blueprint,
-    Markup,
     abort,
     current_app,
-    escape,
     flash,
     g,
     redirect,
@@ -23,6 +21,7 @@ from flask_babel import gettext
 from journalist_app.forms import ReplyForm
 from journalist_app.sessions import session
 from journalist_app.utils import bulk_delete, download, get_source, validate_user
+from markupsafe import Markup, escape
 from models import Reply, SeenReply, Source, SourceStar, Submission
 from sqlalchemy.orm import joinedload
 from sqlalchemy.sql import func
@@ -143,7 +142,7 @@ def make_blueprint() -> Blueprint:
             g.source.interaction_count, g.source.journalist_filename
         )
         EncryptionManager.get_default().encrypt_journalist_reply(
-            for_source_with_filesystem_id=g.filesystem_id,
+            for_source=g.source,
             reply_in=form.message.data,
             encrypted_reply_path_out=Path(Storage.get_default().path(g.filesystem_id, filename)),
         )

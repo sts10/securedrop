@@ -1,12 +1,12 @@
 //! Decryption is much more complicated than encryption,
 //! This code is mostly lifted from https://docs.sequoia-pgp.org/sequoia_guide/chapter_02/index.html
 
+use crate::keys::secret_key_from_cert;
 use anyhow::anyhow;
 use sequoia_openpgp::crypto::{Password, SessionKey};
 use sequoia_openpgp::parse::stream::*;
 use sequoia_openpgp::policy::Policy;
 use sequoia_openpgp::types::SymmetricAlgorithm;
-use sequoia_openpgp::KeyID;
 
 pub(crate) struct Helper<'a> {
     pub(crate) policy: &'a dyn Policy,
@@ -45,29 +45,12 @@ impl<'a> DecryptionHelper for Helper<'a> {
     where
         D: FnMut(SymmetricAlgorithm, &SessionKey) -> bool,
     {
-        // Get the encryption key, which is the first and only subkey, from the cert.
-        // The filter options should be kept in sync with `encrypt()`.
-        let key = self
-            .secret
-            .keys()
-            .secret()
-            .with_policy(self.policy, None)
-            .supported()
-            .alive()
-            .revoked(false)
-            .for_storage_encryption()
-            .next()
-            // In practice this error shouldn't be reachable from SecureDrop-generated keys
-            .ok_or_else(|| {
-                anyhow!("certificate did not have a usable secret key")
-            })?
-            .key()
-            .clone();
+        let key = secret_key_from_cert(self.policy, self.secret)?;
 
         for pkesk in pkesks {
             // Note: this check won't work for messages encrypted with --throw-keyids,
             // but we don't generate any messages that use it.
-            if pkesk.recipient() == &KeyID::from(key.fingerprint()) {
+            if pkesk.recipient() == &key.keyid() {
                 // Decrypt the secret key with the specified passphrase.
                 let mut pair = key
                     .clone()

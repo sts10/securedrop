@@ -8,7 +8,7 @@ import zipfile
 from hashlib import sha256
 from pathlib import Path
 from tempfile import _TemporaryFileWrapper
-from typing import IO, List, Optional, Type, Union
+from typing import BinaryIO, List, Optional, Type, Union
 
 import rm
 from encryption import EncryptionManager
@@ -301,7 +301,7 @@ class Storage:
         count: int,
         journalist_filename: str,
         filename: Optional[str],
-        stream: "IO[bytes]",
+        stream: BinaryIO,
     ) -> str:
 
         if filename is not None:
@@ -324,7 +324,7 @@ class Storage:
 
         encrypted_file_name = f"{count}-{journalist_filename}-doc.gz.gpg"
         encrypted_file_path = self.path(filesystem_id, encrypted_file_name)
-        with SecureTemporaryFile("/tmp") as stf:  # nosec
+        with SecureTemporaryFile("/tmp") as stf:  # noqa: S108
             with gzip.GzipFile(filename=sanitized_filename, mode="wb", fileobj=stf, mtime=0) as gzf:
                 # Buffer the stream into the gzip file to avoid excessive
                 # memory consumption
